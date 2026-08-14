@@ -15,6 +15,7 @@ Useful docs:
 import os
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from src.knowledge_base import build_knowledge_base
+import argparse
 
 
 # ──────────────────────────────────────────────
@@ -55,9 +56,7 @@ Client question: {question}
 Answer:"""
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# TODO 1: Implement ask_question
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 def ask_question(vector_store, llm, question: str) -> dict:
     """Retrieve relevant chunks and generate an answer.
 
@@ -80,14 +79,27 @@ def ask_question(vector_store, llm, question: str) -> dict:
             "answer"  -> str: the generated answer
             "sources" -> list[str]: the chunk texts that were retrieved
     """
-    # TODO: implement this (~6-8 lines)
-    raise NotImplementedError("TODO 1: Implement ask_question")
+
+    question = question.strip()
+    if not question:
+        return {"answer": "Please provide a valid question.", "sources": []}
+
+    docs = vector_store.similarity_search(question, k=3)
+    sources = [doc.page_content for doc in docs]
+    context = "\n\n".join(sources)
+
+    prompt = PROMPT_TEMPLATE.format(context=context, question=question)
+
+    result = llm(prompt)
+    answer = result[0]["generated_text"].strip()
+
+    if not answer:
+        answer = "I don't have enough information to answer that."
+
+    return {"answer": answer, "sources": sources}
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# TODO 2: Complete the interactive loop
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def main():
+def main() -> None:
     """Interactive Q&A loop.
 
     Steps:
@@ -102,9 +114,59 @@ def main():
     """
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
 
-    # TODO: implement this (~10-12 lines)
-    raise NotImplementedError("TODO 2: Complete the interactive loop")
+    parser = argparse.ArgumentParser(description="Ask questions about the agency's services, pricing, and process.")
+    parser.add_argument("--query", type=str, help="Ask one question and exit instead of starting interactive mode.")
+    args = parser.parse_args()
 
+    if not os.path.exists(data_dir):
+        print(f"Data directory '{data_dir}' does not exist. Please run 'python src/knowledge_base.py' first.")
+        return
+
+    text_files = [filename for filename in os.listdir(data_dir) if filename.endswith(".txt")]
+    if not text_files:
+        print(f"No .txt files found in '{data_dir}'. Please add some text files first.")
+        return
+    
+    vector_store = build_knowledge_base(data_dir)
+    llm = get_llm()
+
+    def print_result(result: dict) -> None:
+        """Print retrieved sources and the generated answer."""
+        print("\n Sources:")
+
+        if result["sources"]:
+            for index, source in enumerate(result["sources"], start=1):
+                print(f"  {index}. {source}")
+        else:
+            print("  No sources retrieved.")
+
+        print(f"\n Answer: {result['answer']}\n")
+
+    if args.query is not None:
+        result = ask_question(vector_store, llm, args.query)
+        print_result(result)
+        return
+
+    print("Ask a question about the agency.")
+    print("Type 'quit' to exit.\n")
+
+    while True:
+        try:
+            question = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye!")
+            break
+
+        if question.lower() == "quit":
+            print("Goodbye!")
+            break
+
+        if not question:
+            print("Please enter a question, or type 'quit' to exit.\n")
+            continue
+
+        result = ask_question(vector_store, llm, question)
+        print_result(result)
 
 if __name__ == "__main__":
     main()
